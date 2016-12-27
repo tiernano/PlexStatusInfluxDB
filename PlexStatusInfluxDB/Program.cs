@@ -38,78 +38,84 @@ namespace PlexStatusInfluxDB
         {
             while (true)
             {
-                //get http://<serverip>:32400/status/sessions?X-Plex-Token=<plextoken>
-                HttpClient client = new HttpClient();
-                string path = string.Format("/status/sessions?X-Plex-Token={0}", plexToken);
-                string xml = string.Empty;
+                try {
+                    //get http://<serverip>:32400/status/sessions?X-Plex-Token=<plextoken>
+                    HttpClient client = new HttpClient();
+                    string path = string.Format("/status/sessions?X-Plex-Token={0}", plexToken);
+                    string xml = string.Empty;
 
-                client.BaseAddress = new Uri(string.Format("http://{0}:32400/", ConfigurationManager.AppSettings["plexserver"]));
-                client.DefaultRequestHeaders.Accept.Clear();
-                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/xml"));
-                HttpResponseMessage response = await client.GetAsync(path);
+                    client.BaseAddress = new Uri(string.Format("http://{0}:32400/", ConfigurationManager.AppSettings["plexserver"]));
+                    client.DefaultRequestHeaders.Accept.Clear();
+                    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/xml"));
+                    HttpResponseMessage response = await client.GetAsync(path);
 
-                if (response.IsSuccessStatusCode)
-                {
-                    xml = await response.Content.ReadAsStringAsync();
-                }
-
-
-
-                //parse as XML looking for playing videos: https://github.com/Arcanemagus/plex-api/wiki/Sessions-Status
-                XDocument doc = XDocument.Parse(xml);
-
-                var sessions = (from x in doc.Element("MediaContainer").DescendantsAndSelf()
-                                select x.Attribute("size").Value).FirstOrDefault();
-
-                int sessionCount = int.Parse(sessions);
-                int videoCount = 0;
-                int audioCount = 0;
-                int photoCount = 0;
-
-                if(sessionCount > 0)
-                {
-                    var items = from x in doc.Element("MediaContainer").Descendants()
-                                select x;
-
-                    foreach(var x in items)
+                    if (response.IsSuccessStatusCode)
                     {
-                        switch (x.Name.LocalName)
+                        xml = await response.Content.ReadAsStringAsync();
+                    }
+
+
+
+                    //parse as XML looking for playing videos: https://github.com/Arcanemagus/plex-api/wiki/Sessions-Status
+                    XDocument doc = XDocument.Parse(xml);
+
+                    var sessions = (from x in doc.Element("MediaContainer").DescendantsAndSelf()
+                                    select x.Attribute("size").Value).FirstOrDefault();
+
+                    int sessionCount = int.Parse(sessions);
+                    int videoCount = 0;
+                    int audioCount = 0;
+                    int photoCount = 0;
+
+                    if (sessionCount > 0)
+                    {
+                        var items = from x in doc.Element("MediaContainer").Descendants()
+                                    select x;
+
+                        foreach (var x in items)
                         {
-                            case "Video":
-                                videoCount++;
-                                break;
-                            case "Track":
-                                audioCount++;
-                                break;
-                            case "Photo":
-                                photoCount++;
-                                break;
+                            switch (x.Name.LocalName)
+                            {
+                                case "Video":
+                                    videoCount++;
+                                    break;
+                                case "Track":
+                                    audioCount++;
+                                    break;
+                                case "Photo":
+                                    photoCount++;
+                                    break;
+                            }
                         }
                     }
-                }
 
-                //write to influxDB
+                    //write to influxDB
 
-                InfluxDb db = new InfluxDb(ConfigurationManager.AppSettings["influxdbserver"], ConfigurationManager.AppSettings["influxdbusername"], ConfigurationManager.AppSettings["influxdbpassword"]);
-                var write = db.WriteAsync(ConfigurationManager.AppSettings["influxdbname"],
-                    new Point()
-                    {
-                        Measurement = "playing",
-                        Fields = new Dictionary<string, object>
+                    InfluxDb db = new InfluxDb(ConfigurationManager.AppSettings["influxdbserver"], ConfigurationManager.AppSettings["influxdbusername"], ConfigurationManager.AppSettings["influxdbpassword"]);
+                    var write = db.WriteAsync(ConfigurationManager.AppSettings["influxdbname"],
+                        new Point()
                         {
+                            Measurement = "playing",
+                            Fields = new Dictionary<string, object>
+                            {
                             {"sessions", sessions },
                             {"video", videoCount },
                             {"audio", audioCount },
                             {"photo", photoCount }
-                        },
-                        Tags = new Dictionary<string, object>()
-                        {
+                            },
+                            Tags = new Dictionary<string, object>()
+                            {
                                             { "server", ConfigurationManager.AppSettings["plexserver"] }
-                        },
-                        Precision = InfluxDB.Net.Enums.TimeUnit.Seconds
-                    });
+                            },
+                            Precision = InfluxDB.Net.Enums.TimeUnit.Seconds
+                        });
 
-                Console.WriteLine(string.Format("Written: Sessions: {0} Photo: {1} Video: {2} Audio: {3}", write.Result.Success, photoCount, videoCount, audioCount));
+                    Console.WriteLine(string.Format("Written: Sessions: {0} Photo: {1} Video: {2} Audio: {3}", write.Result.Success, photoCount, videoCount, audioCount));
+                }
+                catch(Exception ex)
+                {
+                    Console.WriteLine("Exception caught: {0}", ex.Message);
+                }
                 Thread.Sleep(60000);
             }
         }
